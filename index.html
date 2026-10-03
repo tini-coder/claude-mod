@@ -1,0 +1,488 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Code Mods — Kiến trúc, xây dựng và tối ưu</title>
+<meta name="description" content="Bài thuyết trình chuyên sâu về Claude Code Mods: hook, middleware, sandbox, Token Weather, best practices.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0a0a0b; --bg2:#101012; --card:rgba(255,255,255,.035); --line:rgba(255,255,255,.09);
+  --text:#f4f4f5; --muted:#a1a1aa; --dim:#71717a;
+  --accent:#f97316; --accent2:#fb923c; --glow:rgba(249,115,22,.18);
+  --green:#4ade80; --red:#f87171; --cyan:#22d3ee; --yellow:#facc15;
+  --mono:'JetBrains Mono',ui-monospace,Menlo,Consolas,monospace;
+  --sans:'Inter',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-snap-type:y proximity;scroll-behavior:smooth;background:var(--bg)}
+body{font-family:var(--sans);color:var(--text);background:var(--bg);line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+  background:
+   radial-gradient(900px 500px at 50% -10%,var(--glow),transparent 70%),
+   linear-gradient(var(--line) 1px,transparent 1px) 0 0/64px 64px,
+   linear-gradient(90deg,var(--line) 1px,transparent 1px) 0 0/64px 64px;
+  -webkit-mask-image:radial-gradient(ellipse at 50% 0%,#000 0%,transparent 75%);
+  mask-image:radial-gradient(ellipse at 50% 0%,#000 0%,transparent 75%);opacity:.55}
+code,pre{font-family:var(--mono)}
+a{color:inherit;text-decoration:none}
+
+/* nav */
+nav{position:fixed;top:0;left:0;right:0;z-index:50;display:flex;align-items:center;justify-content:space-between;
+  padding:14px clamp(16px,4vw,48px);backdrop-filter:blur(14px);background:rgba(10,10,11,.7);border-bottom:1px solid var(--line)}
+.logo{display:flex;align-items:center;gap:10px;font-weight:700;letter-spacing:-.01em}
+.logo i{width:26px;height:26px;border-radius:7px;background:linear-gradient(135deg,var(--accent),#ea580c);display:grid;place-items:center;
+  font:700 13px var(--mono);font-style:normal;color:#fff;box-shadow:0 0 18px var(--glow)}
+.links{display:flex;gap:6px}
+.links a{font-size:13px;color:var(--muted);padding:6px 12px;border-radius:8px;transition:.15s}
+.links a:hover{color:var(--text);background:var(--card)}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:11px 20px;border-radius:10px;font-weight:600;font-size:14px;transition:.18s;border:1px solid var(--line)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#0a0a0b;box-shadow:0 0 28px var(--glow)}
+.btn.primary:hover{background:var(--accent2);transform:translateY(-1px)}
+.btn.ghost{background:var(--card);color:var(--text)}
+.btn.ghost:hover{border-color:rgba(255,255,255,.25)}
+.nav-cta{padding:8px 14px;font-size:13px}
+.bar{position:fixed;top:0;left:0;height:2px;width:0;background:var(--accent);z-index:60;box-shadow:0 0 10px var(--accent)}
+.dots{position:fixed;right:18px;top:50%;transform:translateY(-50%);z-index:40;display:flex;flex-direction:column;gap:10px}
+.dots a{width:8px;height:8px;border-radius:50%;background:var(--dim);opacity:.5;transition:.2s}
+.dots a.on{background:var(--accent);opacity:1;transform:scale(1.5);box-shadow:0 0 10px var(--accent)}
+
+/* sections */
+section{min-height:100vh;scroll-snap-align:start;display:flex;flex-direction:column;justify-content:center;
+  padding:110px clamp(20px,6vw,96px) 70px;max-width:1280px;margin:0 auto}
+.eyebrow{display:inline-flex;align-items:center;gap:8px;font:500 12px var(--mono);color:var(--accent2);
+  border:1px solid rgba(249,115,22,.3);background:rgba(249,115,22,.08);padding:5px 12px;border-radius:99px;width:max-content;margin-bottom:20px;letter-spacing:.04em}
+h1{font-size:clamp(40px,7vw,84px);line-height:1.04;letter-spacing:-.035em;font-weight:800}
+h2{font-size:clamp(30px,4.4vw,52px);line-height:1.1;letter-spacing:-.03em;font-weight:800;margin-bottom:16px}
+h3{font-size:18px;letter-spacing:-.01em;margin-bottom:8px}
+.grad{background:linear-gradient(100deg,#fff 10%,var(--accent2) 55%,var(--accent));-webkit-background-clip:text;background-clip:text;color:transparent}
+.lead{color:var(--muted);font-size:clamp(16px,1.6vw,20px);max-width:720px}
+.hl{color:var(--accent2)}
+.grid{display:grid;gap:16px;margin-top:36px}
+.g2{grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+.g3{grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+.g4{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:24px;transition:.2s;position:relative;overflow:hidden}
+.card:hover{border-color:rgba(249,115,22,.4);transform:translateY(-3px);background:rgba(255,255,255,.05)}
+.card p{color:var(--muted);font-size:14.5px}
+.ico{width:40px;height:40px;border-radius:10px;background:rgba(249,115,22,.12);border:1px solid rgba(249,115,22,.25);display:grid;place-items:center;font-size:19px;margin-bottom:16px}
+.num{font:700 12px var(--mono);color:var(--accent2);margin-bottom:12px;display:block}
+.tag{display:inline-block;font:600 11px var(--mono);padding:3px 9px;border-radius:6px;margin-bottom:12px;letter-spacing:.04em}
+.t-obs{color:var(--cyan);background:rgba(34,211,238,.1)}.t-rew{color:var(--yellow);background:rgba(250,204,21,.1)}.t-ans{color:var(--red);background:rgba(248,113,113,.1)}
+
+/* terminal / code */
+.term{background:#0d0d0f;border:1px solid var(--line);border-radius:14px;overflow:hidden;box-shadow:0 30px 80px -30px rgba(0,0,0,.8),0 0 0 1px rgba(249,115,22,.05)}
+.term-h{display:flex;align-items:center;gap:7px;padding:11px 16px;border-bottom:1px solid var(--line);background:rgba(255,255,255,.025)}
+.term-h b{width:11px;height:11px;border-radius:50%;background:#3f3f46}
+.term-h b:nth-child(1){background:#ef4444}.term-h b:nth-child(2){background:#eab308}.term-h b:nth-child(3){background:#22c55e}
+.term-h span{margin-left:10px;font:12px var(--mono);color:var(--dim)}
+pre{padding:18px 20px;font-size:13px;line-height:1.7;overflow-x:auto;color:#d4d4d8;tab-size:2}
+pre .c{color:#52525b}pre .k{color:#fb923c}pre .s{color:#86efac}pre .f{color:#67e8f9}pre .n{color:#fde047}pre .p{color:var(--accent2)}
+.prompt{color:var(--accent2)}
+.copy{margin-left:auto;font:11px var(--mono);color:var(--dim);background:none;border:1px solid var(--line);border-radius:6px;padding:3px 9px;cursor:pointer;transition:.15s}
+.copy:hover{color:var(--text);border-color:rgba(255,255,255,.3)}
+.split{display:grid;grid-template-columns:1fr 1.15fr;gap:40px;align-items:center}
+@media(max-width:900px){.split{grid-template-columns:1fr}.dots{display:none}.links{display:none}}
+
+/* pipeline */
+.pipe{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:10px;margin:36px 0 8px}
+.node{padding:14px 20px;border-radius:12px;border:1px solid var(--line);background:var(--card);font:500 13px var(--mono);text-align:center}
+.node.hot{border-color:rgba(249,115,22,.5);background:rgba(249,115,22,.1);color:var(--accent2);box-shadow:0 0 24px var(--glow)}
+.arr{color:var(--accent);font-family:var(--mono)}
+.chain{display:flex;gap:10px;align-items:center;padding:16px;border:1px dashed rgba(249,115,22,.35);border-radius:14px;flex-wrap:wrap;justify-content:center}
+
+/* table */
+.tbl{margin-top:32px;border:1px solid var(--line);border-radius:16px;overflow:hidden;overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:14px;min-width:620px}
+th,td{padding:15px 20px;text-align:left;border-bottom:1px solid var(--line)}
+tr:last-child td{border-bottom:0}
+th{font:600 12px var(--mono);color:var(--dim);letter-spacing:.06em;text-transform:uppercase;background:rgba(255,255,255,.025)}
+th.m{color:var(--accent2)}
+td:first-child{font-weight:600}
+td.bad{color:var(--dim)}td.good{color:var(--text)}
+td.good::before{content:"✓ ";color:var(--green);font-weight:700}
+
+/* weather preview */
+.weather{display:flex;align-items:center;gap:12px;padding:14px 18px;border:1px solid rgba(34,211,238,.35);border-radius:12px;background:rgba(34,211,238,.06);font:500 14px var(--mono);color:var(--cyan);margin-bottom:6px}
+.meter{height:6px;border-radius:99px;background:rgba(255,255,255,.08);overflow:hidden;margin-top:10px}
+.meter i{display:block;height:100%;width:16%;background:linear-gradient(90deg,var(--green),var(--cyan));border-radius:99px}
+.input{padding:13px 18px;border:1px solid var(--line);border-radius:10px;font:14px var(--mono);color:var(--dim)}
+.tabs{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap}
+.tabs button{font:500 12px var(--mono);color:var(--muted);background:var(--card);border:1px solid var(--line);padding:7px 14px;border-radius:8px;cursor:pointer;transition:.15s}
+.tabs button.on{color:#0a0a0b;background:var(--accent);border-color:var(--accent)}
+.pane{display:none}.pane.on{display:block}
+
+.steps{counter-reset:s;display:flex;flex-direction:column;gap:14px;margin-top:8px}
+.steps li{list-style:none;display:flex;gap:14px;color:var(--muted);font-size:15px}
+.steps li::before{counter-increment:s;content:counter(s);flex:none;width:28px;height:28px;border-radius:8px;background:rgba(249,115,22,.12);border:1px solid rgba(249,115,22,.3);color:var(--accent2);display:grid;place-items:center;font:700 12px var(--mono)}
+.steps b{color:var(--text)}
+.kv{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px}
+.pill{font:12px var(--mono);padding:6px 12px;border-radius:99px;border:1px solid var(--line);color:var(--muted);background:var(--card)}
+.quote{border-left:2px solid var(--accent);padding:6px 0 6px 18px;color:var(--muted);font-style:italic;margin:20px 0}
+
+/* stats */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:16px;margin-top:40px}
+.stat b{display:block;font-size:34px;font-weight:800;letter-spacing:-.03em;color:var(--accent2)}
+.stat span{color:var(--dim);font-size:13px}
+.hero{align-items:flex-start;padding-top:140px}
+.hero .lead{margin:24px 0 34px}
+.cta{display:flex;gap:12px;flex-wrap:wrap}
+.hero-term{margin-top:56px;width:100%;max-width:760px}
+.scroll-hint{margin-top:40px;color:var(--dim);font:12px var(--mono)}
+footer{text-align:center;padding:40px 20px 60px;color:var(--dim);font-size:13px;border-top:1px solid var(--line)}
+.cursor{display:inline-block;width:8px;height:15px;background:var(--accent);vertical-align:-2px;animation:b 1s steps(1) infinite}
+@keyframes b{50%{opacity:0}}
+.rev{opacity:0;transform:translateY(26px);transition:opacity .7s ease,transform .7s ease}
+.rev.in{opacity:1;transform:none}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.rev{opacity:1;transform:none;transition:none}.cursor{animation:none}}
+</style>
+</head>
+<body>
+<div class="bar" id="bar"></div>
+<nav>
+  <a class="logo" href="#top"><i>&gt;_</i> Claude Code Mods</a>
+  <div class="links">
+    <a href="#arch">Kiến trúc</a><a href="#build">Xây dựng</a><a href="#adv">Nâng cao</a><a href="#best">Best practices</a><a href="#ship">Phân phối</a>
+  </div>
+  <a class="btn primary nav-cta" href="#build">Bắt đầu →</a>
+</nav>
+<div class="dots" id="dots"></div>
+
+<!-- 1 HERO -->
+<section id="top" class="hero" data-title="Mở đầu">
+  <span class="eyebrow rev">● PLUGIN SYSTEM CHO CLAUDE CODE CLI</span>
+  <h1 class="rev">Biến Claude Code thành<br><span class="grad">môi trường của riêng bạn</span></h1>
+  <p class="lead rev">Hướng dẫn chuyên sâu về Mods: kiến trúc hook / middleware, cách xây từ A–Z, và thói quen tối ưu để mở rộng hệ sinh thái cho developer.</p>
+  <div class="cta rev">
+    <a class="btn primary" href="#build">Xây Mod đầu tiên</a>
+    <a class="btn ghost" href="#arch">Xem kiến trúc</a>
+  </div>
+  <div class="term hero-term rev">
+    <div class="term-h"><b></b><b></b><b></b><span>~/token-weather-mod</span></div>
+<pre><span class="prompt">$</span> claude --plugin-dir ./token-weather-mod
+<span class="c"># lưu file → reload trong vài mili-giây</span>
+<span class="s">🌤️ Token Weather: Clear (32,450 / 200,000 tokens - 16%)</span>
+<span class="prompt">&gt;</span> Enter your prompt here...<span class="cursor"></span></pre>
+  </div>
+  <div class="scroll-hint">↓ cuộn hoặc dùng phím ← → ↑ ↓ / Space</div>
+</section>
+
+<!-- 2 PROBLEM -->
+<section id="why" data-title="Vấn đề">
+  <span class="eyebrow rev">01 · VẤN ĐỀ</span>
+  <h2 class="rev">Một công cụ <span class="grad">"dùng chung cho tất cả"</span><br>không đủ cho mọi team</h2>
+  <p class="lead rev">Claude Code là cộng sự ngay trên terminal: đọc code, chạy lệnh, sửa lỗi, refactor cả dự án. Nhưng mỗi workflow, tiêu chuẩn an toàn và sở thích giao diện lại khác nhau.</p>
+  <div class="grid g3">
+    <div class="card rev"><div class="ico">🛡️</div><h3>An toàn</h3><p>Làm sao ngăn Claude Code vô tình chạy lệnh nguy hiểm làm mất dữ liệu?</p></div>
+    <div class="card rev"><div class="ico">📊</div><h3>Quan sát</h3><p>Làm sao thấy lượng token đã dùng ngay trên màn hình mà không cần gõ lệnh?</p></div>
+    <div class="card rev"><div class="ico">⏪</div><h3>Truy vết</h3><p>Làm sao xem lại từng bước thay đổi code của Agent (replay) một cách chính xác?</p></div>
+  </div>
+</section>
+
+<!-- 3 WHAT -->
+<section id="what" data-title="Mods là gì">
+  <span class="eyebrow rev">02 · TỔNG QUAN</span>
+  <h2 class="rev">Claude Code <span class="grad">Mods</span> là gì?</h2>
+  <p class="lead rev">Hệ thống plugin cho phép chèn mã <b class="hl">JavaScript / TypeScript</b> vào các hook trong lifecycle của Claude Code để can thiệp, mở rộng và tùy biến hành vi của nó.</p>
+  <div class="grid g4">
+    <div class="card rev"><span class="num">01</span><h3>UI Extensions</h3><p>Vẽ thanh trạng thái, dự báo token, bảng cảnh báo trên terminal bằng Ink/React.</p></div>
+    <div class="card rev"><span class="num">02</span><h3>Safety Guards</h3><p>Chặn hoặc yêu cầu xác nhận trước <code>rm -rf</code>, <code>git push --force</code>.</p></div>
+    <div class="card rev"><span class="num">03</span><h3>Auditing &amp; Telemetry</h3><p>Ghi lại toàn bộ hành động sửa file và thực thi lệnh của Agent.</p></div>
+    <div class="card rev"><span class="num">04</span><h3>Workflow Automation</h3><p>Tự inject context hoặc đổi cấu trúc prompt trước khi gửi tới Claude.</p></div>
+  </div>
+</section>
+
+<!-- 4 ARCH -->
+<section id="arch" data-title="Kiến trúc">
+  <span class="eyebrow rev">03 · KIẾN TRÚC</span>
+  <h2 class="rev">Middleware pipeline<br>+ <span class="grad">sandbox execution</span></h2>
+  <p class="lead rev">Mỗi sự kiện đi qua một chuỗi hook đã đăng ký. Mod nhận dữ liệu theo thứ tự cấu hình và có thể truyền dữ liệu đã biến đổi cho Mod kế tiếp.</p>
+  <div class="pipe rev">
+    <div class="node">Sự kiện<br><small style="color:var(--dim)">User / Agent</small></div><span class="arr">──▶</span>
+    <div class="chain"><div class="node hot">Mod A</div><span class="arr">▶</span><div class="node hot">Mod B</div><span class="arr">▶</span><div class="node hot">Mod C</div></div>
+    <span class="arr">──▶</span><div class="node">Claude Code</div>
+  </div>
+  <div class="grid g3">
+    <div class="card rev"><span class="tag t-obs">OBSERVE · Quan sát</span><p>Đọc dữ liệu, làm việc phụ (log, lưu state) mà <b>không đổi</b> luồng chính.<br><br><span class="hl">VD:</span> đếm file đã sửa, ghi lịch sử bash ra <code>.log</code>.</p></div>
+    <div class="card rev"><span class="tag t-rew">REWRITE · Ghi đè</span><p><b>Sửa dữ liệu vào/ra</b> trước khi chuyển sang mắt xích tiếp theo.<br><br><span class="hl">VD:</span> tự thêm <code>--dry-run</code>, chèn quy tắc bảo vệ vào prompt.</p></div>
+    <div class="card rev"><span class="tag t-ans">ANSWER · Chặn / Trả lời</span><p><b>Ngắt luồng chuẩn</b>, tự trả lời hoặc từ chối hành động.<br><br><span class="hl">VD:</span> chặn xóa root, tự trả lời câu hỏi cấu hình.</p></div>
+  </div>
+  <div class="term rev" style="margin-top:24px">
+    <div class="term-h"><b></b><b></b><b></b><span>Runtime context — đối tượng $</span></div>
+<pre><span class="f">$.session.usage()</span>  <span class="c">// token usage + context window còn lại</span>
+<span class="f">$.state</span>            <span class="c">// persistent state, sống sót qua hot-reload</span>
+<span class="f">$.ui</span>               <span class="c">// tiện ích render UI lên terminal</span></pre>
+  </div>
+</section>
+
+<!-- 5 COMPARE -->
+<section id="compare" data-title="So sánh">
+  <span class="eyebrow rev">04 · SO SÁNH</span>
+  <h2 class="rev">Settings Hooks <span style="color:var(--dim)">vs.</span> <span class="grad">Mods</span></h2>
+  <p class="lead rev">Settings Hooks chỉ là script Bash đơn lẻ. Mods là một nền tảng mở rộng đầy đủ.</p>
+  <div class="tbl rev">
+    <table>
+      <tr><th>Tiêu chí</th><th>Settings Hooks</th><th class="m">Claude Code Mods</th></tr>
+      <tr><td>Ngôn ngữ</td><td class="bad">Bash / lệnh shell đơn lẻ</td><td class="good">JavaScript / TypeScript ESNext</td></tr>
+      <tr><td>Can thiệp UI</td><td class="bad">Không (chỉ in text)</td><td class="good">Rất mạnh — Ink/React UI</td></tr>
+      <tr><td>Quản lý state</td><td class="bad">File tạm trên đĩa</td><td class="good"><code>$.state</code> bền vững trong bộ nhớ</td></tr>
+      <tr><td>Isolation</td><td class="bad">Thấp — chạy trực tiếp trên shell</td><td class="good">Cao — Sandbox an toàn</td></tr>
+      <tr><td>Đóng gói &amp; chia sẻ</td><td class="bad">Chép script thủ công</td><td class="good">Phân phối qua NPM / Git</td></tr>
+      <tr><td>Giai đoạn tương tác</td><td class="bad">Trước / sau khi chạy lệnh</td><td class="good">Toàn vòng đời: UI, Tools, Prompts, Usage, Events</td></tr>
+    </table>
+  </div>
+</section>
+
+<!-- 6 BUILD -->
+<section id="build" data-title="Token Weather">
+  <span class="eyebrow rev">05 · THỰC HÀNH</span>
+  <h2 class="rev">Tự tạo Mod <span class="grad">"Token Weather"</span></h2>
+  <p class="lead rev">Theo dõi token trong Context Window và vẽ thanh "thời tiết" ngay phía trên ô nhập prompt (<code>AbovePrompt</code>).</p>
+  <div class="split" style="margin-top:36px">
+    <div class="rev">
+      <div class="weather">🌤️ Token Weather: Clear (32,450 / 200,000 — 16%)</div>
+      <div class="meter"><i></i></div>
+      <div class="input" style="margin-top:14px">&gt; Enter your prompt here...</div>
+      <ol class="steps" style="margin-top:28px">
+        <li><span><b>Cấu trúc thư mục</b> — <code>.claude-plugin/</code>, <code>hooks/</code>, <code>src/</code></span></li>
+        <li><span><b>Manifest</b> — <code>plugin.json</code> &amp; <code>hooks.json</code></span></li>
+        <li><span><b>Logic</b> — đọc usage, lưu <code>$.state</code>, tính "thời tiết"</span></li>
+        <li><span><b>Handler</b> — trả về Element để render UI</span></li>
+      </ol>
+    </div>
+    <div class="rev">
+      <div class="tabs" data-tabs>
+        <button class="on" data-p="p1">structure</button><button data-p="p2">plugin.json</button><button data-p="p3">hooks.json</button><button data-p="p4">weather-utils.js</button><button data-p="p5">index.js</button>
+      </div>
+      <div class="term">
+        <div class="term-h"><b></b><b></b><b></b><span id="fname">token-weather-mod/</span><button class="copy" id="copy">copy</button></div>
+        <div class="pane on" id="p1" data-f="token-weather-mod/"><pre>token-weather-mod/
+├── .claude-plugin/
+│   └── plugin.json       <span class="c"># metadata</span>
+├── hooks/
+│   └── hooks.json        <span class="c"># event hooks đăng ký</span>
+├── src/
+│   ├── index.js          <span class="c"># mã nguồn chính</span>
+│   └── weather-utils.js  <span class="c"># logic thời tiết</span>
+└── package.json</pre></div>
+        <div class="pane" id="p2" data-f=".claude-plugin/plugin.json"><pre>{
+  <span class="k">"name"</span>: <span class="s">"token-weather"</span>,
+  <span class="k">"version"</span>: <span class="s">"1.0.0"</span>,
+  <span class="k">"description"</span>: <span class="s">"Hiển thị dự báo thời tiết cho Context Window Token Usage"</span>,
+  <span class="k">"author"</span>: <span class="s">"Developer Name"</span>,
+  <span class="k">"main"</span>: <span class="s">"src/index.js"</span>
+}</pre></div>
+        <div class="pane" id="p3" data-f="hooks/hooks.json"><pre>{
+  <span class="k">"hooks"</span>: [
+    {
+      <span class="k">"event"</span>: <span class="s">"ui.render"</span>,
+      <span class="k">"target"</span>: <span class="s">"AbovePrompt"</span>,
+      <span class="k">"handler"</span>: <span class="s">"renderWeatherBar"</span>
+    }
+  ]
+}</pre></div>
+        <div class="pane" id="p4" data-f="src/weather-utils.js"><pre><span class="k">export function</span> <span class="f">calculateWeather</span>(usedTokens, maxTokens) {
+  <span class="k">const</span> percentage = (usedTokens / maxTokens) * <span class="n">100</span>;
+
+  <span class="k">if</span> (percentage &lt; <span class="n">30</span>) <span class="k">return</span> { status: <span class="s">'Clear'</span>, icon: <span class="s">'☀️'</span>, color: <span class="s">'green'</span> };
+  <span class="k">if</span> (percentage &lt; <span class="n">60</span>) <span class="k">return</span> { status: <span class="s">'Partly Cloudy'</span>, icon: <span class="s">'🌤️'</span>, color: <span class="s">'cyan'</span> };
+  <span class="k">if</span> (percentage &lt; <span class="n">80</span>) <span class="k">return</span> { status: <span class="s">'Overcast'</span>, icon: <span class="s">'☁️'</span>, color: <span class="s">'yellow'</span> };
+  <span class="k">if</span> (percentage &lt; <span class="n">95</span>) <span class="k">return</span> { status: <span class="s">'Storm Warning'</span>, icon: <span class="s">'🌩️'</span>, color: <span class="s">'red'</span> };
+  <span class="k">return</span> { status: <span class="s">'Critical / Compression Required'</span>, icon: <span class="s">'🚨'</span>, color: <span class="s">'bgRed'</span> };
+}</pre></div>
+        <div class="pane" id="p5" data-f="src/index.js"><pre><span class="k">import</span> { calculateWeather } <span class="k">from</span> <span class="s">'./weather-utils.js'</span>;
+
+<span class="k">export async function</span> <span class="f">renderWeatherBar</span>(event, $) {
+  <span class="k">try</span> {
+    <span class="k">const</span> usage = <span class="k">await</span> $.session.<span class="f">usage</span>();
+    <span class="k">const</span> usedTokens = usage.inputTokens + usage.outputTokens;
+    <span class="k">const</span> maxTokens = usage.contextWindowSize || <span class="n">200000</span>;
+
+    $.state.lastKnownUsage = { used: usedTokens, max: maxTokens, updatedAt: Date.<span class="f">now</span>() };
+
+    <span class="k">const</span> weather = <span class="f">calculateWeather</span>(usedTokens, maxTokens);
+    <span class="k">const</span> pct = ((usedTokens / maxTokens) * <span class="n">100</span>).<span class="f">toFixed</span>(<span class="n">1</span>);
+
+    <span class="k">return</span> {
+      type: <span class="s">'Text'</span>,
+      content: <span class="s">`${weather.icon} Token Weather: ${weather.status} (${usedTokens.toLocaleString()} / ${maxTokens.toLocaleString()} - ${pct}%)`</span>,
+      style: { color: weather.color, bold: <span class="k">true</span>, dim: pct &lt; <span class="n">30</span> }
+    };
+  } <span class="k">catch</span> (error) {
+    <span class="k">return</span> { type: <span class="s">'Text'</span>, content: <span class="s">'⚠️ Token Weather: Unavailable'</span>, style: { color: <span class="s">'gray'</span> } };
+  }
+}</pre></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 7 DEV LOOP -->
+<section id="dev" data-title="Hot-reload">
+  <span class="eyebrow rev">06 · DEV LOOP</span>
+  <h2 class="rev">Hot-reload &amp; <span class="grad">$.state</span></h2>
+  <p class="lead rev">Không cần khởi động lại Claude Code mỗi lần sửa code — feedback loop dưới 1 giây.</p>
+  <div class="split" style="margin-top:36px">
+    <div class="term rev">
+      <div class="term-h"><b></b><b></b><b></b><span>terminal</span></div>
+<pre><span class="prompt">$</span> claude --plugin-dir ./token-weather-mod
+
+<span class="c">// ❌ mất sau reload</span>
+<span class="k">let</span> memoryCache = {};
+
+<span class="c">// ✅ sống sót qua reload</span>
+$.state.memoryCache = {};</pre>
+    </div>
+    <div class="rev">
+      <div class="card" style="margin-bottom:16px"><h3>⚡ Reload tức thì</h3><p>Mỗi lần lưu file trong thư mục plugin, mã nguồn mới được nạp lại trong vài mili-giây.</p></div>
+      <div class="card"><h3>🧠 Vì sao cần <code>$.state</code>?</h3><p>Khi reload, mọi biến toàn cục trong VM bị xóa sạch. <code>$.state</code> được Claude Code giữ <b>bên ngoài</b> sandbox nên dữ liệu vẫn nguyên vẹn.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- 8 META -->
+<section id="meta" data-title="Meta-prompting">
+  <span class="eyebrow rev">07 · LỐI TẮT</span>
+  <h2 class="rev">Dùng Claude Code để <span class="grad">tự thiết kế Mod</span></h2>
+  <p class="lead rev">Không cần viết boilerplate thủ công — hãy meta-prompt. Claude tự gọi tool tạo file, viết code và kiểm tra cú pháp.</p>
+  <div class="term rev" style="margin-top:36px;max-width:900px">
+    <div class="term-h"><b></b><b></b><b></b><span>claude</span></div>
+<pre><span class="prompt">&gt;</span> Tôi muốn tạo một Claude Code Mod có tên là <span class="s">'safe-git-guard'</span>.
+  Mod này sẽ chặn mọi lệnh bash chứa <span class="n">git push --force</span> hoặc
+  <span class="n">git reset --hard</span> và hiển thị cảnh báo đỏ yêu cầu tôi xác nhận
+  bằng cách gõ <span class="s">'YES'</span>. Hãy tạo đầy đủ cấu trúc thư mục, file
+  plugin.json, hooks.json và code JavaScript sử dụng bẫy
+  <span class="f">tools.beforeExecute</span>. Quản lý state danh sách lệnh bị chặn vào <span class="f">$.state</span>.</pre>
+  </div>
+  <div class="kv rev"><span class="pill">⏱ vài phút</span><span class="pill">📁 tự dựng cấu trúc</span><span class="pill">✅ tránh sai tên hook</span></div>
+</section>
+
+<!-- 9 ADVANCED -->
+<section id="adv" data-title="Ví dụ nâng cao">
+  <span class="eyebrow rev">08 · NÂNG CAO</span>
+  <h2 class="rev">Hai Mod <span class="grad">tiêu biểu</span></h2>
+  <div class="grid g2">
+    <div class="card rev">
+      <div class="ico">💥</div><h3>Blast Radius</h3>
+      <p>Phân tích lệnh CLI trước khi chạy và tính "bán kính ảnh hưởng" — số file/thư mục có nguy cơ bị xóa hay sửa.</p>
+      <div class="term" style="margin-top:18px"><div class="term-h"><b></b><b></b><b></b><span>tools.beforeExecute</span></div>
+<pre><span class="k">if</span> (toolName !== <span class="s">'Bash'</span>) <span class="k">return</span>;
+<span class="k">const</span> risky = <span class="s">/rm\s+-rf|git\s+clean|drop\s+database/i</span>
+  .<span class="f">test</span>(input.command);
+
+<span class="k">if</span> (risky) <span class="k">return</span> $.ui.<span class="f">confirm</span>({
+  title: <span class="s">'🚨 CRITICAL BLAST RADIUS'</span>,
+  severity: <span class="s">'high'</span>
+});</pre></div>
+      <span class="tag t-ans" style="margin-top:14px">ANSWER → xác nhận thủ công</span>
+    </div>
+    <div class="card rev">
+      <div class="ico">🎬</div><h3>Replay Theater</h3>
+      <p>Bảng điều khiển tương tác để "tua lại" từng bước sửa code của Agent như xem video.</p>
+      <ol class="steps" style="margin-top:20px">
+        <li><span><code>tools.afterExecute</code> (Edit/Write) → lưu <b>snapshot diff</b> vào <code>$.state.history</code></span></li>
+        <li><span>Người dùng gõ <code>/replay</code> → hook <code>command.execute</code></span></li>
+        <li><span>Render <b>slider / timeline</b> chọn step</span></li>
+        <li><span>Hiển thị diff trực quan từng file tại mốc đã chọn</span></li>
+      </ol>
+      <span class="tag t-obs" style="margin-top:18px">OBSERVE → ghi lại, không can thiệp</span>
+    </div>
+  </div>
+</section>
+
+<!-- 10 BEST PRACTICES -->
+<section id="best" data-title="Best practices">
+  <span class="eyebrow rev">09 · BEST PRACTICES</span>
+  <h2 class="rev">4 thói quen <span class="grad">vàng</span> khi làm Mod</h2>
+  <div class="grid g4">
+    <div class="card rev"><span class="num">01</span><h3>Khai thác Hot-Reload</h3><p>Chạy <code>claude --plugin-dir .</code> và giữ terminal mở. Feedback loop &lt; 1 giây.</p></div>
+    <div class="card rev"><span class="num">02</span><h3>Ủy quyền dựng khung</h3><p>Để Claude sinh cấu trúc và type definition — tránh sai tên hook, sai định dạng manifest.</p></div>
+    <div class="card rev"><span class="num">03</span><h3>Dùng <code>$.state</code></h3><p>Không dùng biến toàn cục — chúng mất sạch khi reload. Lưu dữ liệu biến đổi vào <code>$.state</code>.</p></div>
+    <div class="card rev"><span class="num">04</span><h3>Fail-safe execution</h3><p>Bọc <code>try…catch</code>, trả fallback. Một Mod crash không được làm hỏng phiên làm việc.</p></div>
+  </div>
+</section>
+
+<!-- 11 SHIP -->
+<section id="ship" data-title="Phân phối">
+  <span class="eyebrow rev">10 · ĐÓNG GÓI &amp; PHÂN PHỐI</span>
+  <h2 class="rev">Validate → Test → <span class="grad">Ship</span></h2>
+  <div class="split" style="margin-top:36px">
+    <div class="rev">
+      <div class="term">
+        <div class="term-h"><b></b><b></b><b></b><span>validate &amp; test</span></div>
+<pre><span class="prompt">$</span> claude plugin validate ./token-weather-mod
+<span class="s">✔ Plugin "token-weather" structure and manifest are valid.</span>
+
+<span class="c">// tests/weather.test.js (Jest/Vitest)</span>
+<span class="f">test</span>(<span class="s">'Critical khi dùng &gt; 95% token'</span>, () =&gt; {
+  <span class="k">const</span> r = <span class="f">calculateWeather</span>(<span class="n">195000</span>, <span class="n">200000</span>);
+  <span class="f">expect</span>(r.status).<span class="f">toBe</span>(<span class="s">'Critical / Compression Required'</span>);
+  <span class="f">expect</span>(r.icon).<span class="f">toBe</span>(<span class="s">'🚨'</span>);
+});</pre>
+      </div>
+    </div>
+    <div class="rev">
+      <div class="card" style="margin-bottom:14px"><h3>📁 Local Project Scope</h3><p><code>.claude/plugins/</code> trong repo — cả team clone về là có sẵn.</p></div>
+      <div class="card" style="margin-bottom:14px"><h3>👤 User Global Scope</h3><p><code>~/.claude/plugins/</code> — áp dụng cho mọi dự án trên máy.</p></div>
+      <div class="card"><h3>📦 NPM / GitHub Release</h3><p>Publish với tiền tố <code>claude-mod-*</code>:<br><code class="hl">claude plugin install claude-mod-token-weather</code></p></div>
+    </div>
+  </div>
+</section>
+
+<!-- 12 CTA -->
+<section id="end" data-title="Kết" style="align-items:center;text-align:center">
+  <span class="eyebrow rev">● KẾT LUẬN</span>
+  <h2 class="rev" style="font-size:clamp(34px,5.4vw,64px)">Từ AI "nguyên bản"<br>đến <span class="grad">môi trường lập trình của bạn</span></h2>
+  <p class="lead rev" style="margin:12px auto 0">Làm chủ Hook, Middleware và UI Extension để nâng hiệu suất cá nhân và dựng hàng rào an toàn cho cả đội. Hệ sinh thái Mods đang ở giai đoạn bùng nổ đầu tiên — đây là thời điểm vàng để bắt đầu.</p>
+  <div class="stats rev" style="width:100%;max-width:760px">
+    <div class="stat"><b>3</b><span>loại phản hồi hook</span></div>
+    <div class="stat"><b>&lt;1s</b><span>vòng phản hồi dev</span></div>
+    <div class="stat"><b>3</b><span>cách phân phối</span></div>
+    <div class="stat"><b>4</b><span>thói quen vàng</span></div>
+  </div>
+  <div class="cta rev" style="margin-top:40px;justify-content:center">
+    <a class="btn primary" href="#build">Xây Mod ngay →</a>
+    <a class="btn ghost" href="#top">↑ Về đầu trang</a>
+  </div>
+</section>
+<footer>Claude Code Mods · Bài thuyết trình · Dark mode</footer>
+
+<script>
+(function(){
+  var secs=[].slice.call(document.querySelectorAll('section')),dots=document.getElementById('dots'),bar=document.getElementById('bar');
+  secs.forEach(function(s,i){var a=document.createElement('a');a.href='#'+s.id;a.title=s.dataset.title||'';dots.appendChild(a)});
+  var da=dots.children;
+  function cur(){var y=window.scrollY+window.innerHeight/2,c=0;secs.forEach(function(s,i){if(s.offsetTop<=y)c=i});return c}
+  function upd(){
+    var h=document.documentElement.scrollHeight-window.innerHeight;
+    bar.style.width=(h>0?window.scrollY/h*100:0)+'%';
+    var c=cur();for(var i=0;i<da.length;i++)da[i].classList.toggle('on',i===c);
+  }
+  addEventListener('scroll',upd,{passive:true});upd();
+  addEventListener('keydown',function(e){
+    if(/INPUT|TEXTAREA/.test(e.target.tagName)||e.metaKey||e.ctrlKey||e.altKey)return;
+    var k=e.key,c=cur(),t=null;
+    if(k==='ArrowRight'||k==='ArrowDown'||k==='PageDown'||(k===' '&&!e.shiftKey))t=Math.min(c+1,secs.length-1);
+    else if(k==='ArrowLeft'||k==='ArrowUp'||k==='PageUp'||(k===' '&&e.shiftKey))t=Math.max(c-1,0);
+    else if(k==='Home')t=0;else if(k==='End')t=secs.length-1;
+    if(t!==null){e.preventDefault();secs[t].scrollIntoView({behavior:'smooth'})}
+  });
+  var io=new IntersectionObserver(function(es){es.forEach(function(en){if(en.isIntersecting){en.target.classList.add('in');io.unobserve(en.target)}})},{threshold:.12});
+  document.querySelectorAll('.rev').forEach(function(el,i){el.style.transitionDelay=(i%4)*70+'ms';io.observe(el)});
+  var tabs=document.querySelector('[data-tabs]'),fname=document.getElementById('fname'),cp=document.getElementById('copy');
+  tabs.addEventListener('click',function(e){
+    var b=e.target.closest('button');if(!b)return;
+    tabs.querySelectorAll('button').forEach(function(x){x.classList.toggle('on',x===b)});
+    document.querySelectorAll('.pane').forEach(function(p){var on=p.id===b.dataset.p;p.classList.toggle('on',on);if(on)fname.textContent=p.dataset.f});
+  });
+  cp.addEventListener('click',function(){
+    var p=document.querySelector('.pane.on pre');
+    try{navigator.clipboard.writeText(p.innerText).then(function(){cp.textContent='copied ✓';setTimeout(function(){cp.textContent='copy'},1400)})}catch(_){}
+  });
+})();
+</script>
+</body>
+</html>
